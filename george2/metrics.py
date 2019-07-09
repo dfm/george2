@@ -44,4 +44,4 @@ class DenseMetric(Metric):
     def forward(self, x):
         soln = torch.triangular_solve(x.unsqueeze(-1), self.L, upper=False)
         alpha = soln.solution.squeeze(-1)
-        return torch.mul(alpha, alpha).sum(-1)
+        return torch.norm(alpha, dim=-1)  # torch.mul(alpha, alpha).sum(-1)

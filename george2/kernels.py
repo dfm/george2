@@ -1,23 +1,38 @@
 # -*- coding: utf-8 -*-
 
-__all__ = []
+__all__ = [
+    "Kernel",
+    "Sum", "Product",
+    "ExpSquared",
+]
 
 import torch
 
 
-def _kernel_or_constant(a):
+def _kernel_or_constant(a, other=None):
     if torch.is_tensor(a):
         return Constant(a)
     try:
         a = float(a)
     except TypeError:
         return a
-    return Constant(torch.tensor(a))
+
+    try:
+        dtype = other.dtype
+    except AttributeError:
+        dtype = None
+
+    try:
+        device = other.device
+    except AttributeError:
+        device = None
+
+    return Constant(torch.tensor(a, dtype=dtype, device=device))
 
 
 def _apply_binary_op(op, a, b):
-    a = _kernel_or_constant(a)
-    b = _kernel_or_constant(b)
+    a = _kernel_or_constant(a, other=b)
+    b = _kernel_or_constant(b, other=a)
     return op(a, b)
 
 
@@ -38,6 +53,24 @@ class Kernel(torch.nn.Module):
     def forward(self, x1, x2, diag=False):
         raise NotImplementedError("subclasses should implement 'value'")
 
+    @property
+    def device(self):
+        devices = list(set(p.device for p in self.parameters()))
+        if len(devices) > 1:
+            raise RuntimeError("inconsistent devices")
+        if not len(devices):
+            return None
+        return devices[0]
+
+    @property
+    def dtype(self):
+        dtypes = list(set(p.dtype for p in self.parameters()))
+        if len(dtypes) > 1:
+            raise RuntimeError("inconsistent dtypes")
+        if not len(dtypes):
+            return None
+        return dtypes[0]
+
 
 class Operator(Kernel):
 
@@ -53,10 +86,9 @@ class Operator(Kernel):
         result = self.kernels[0](x1, x2, diag=diag)
         for k in self.kernels[1:]:
             if isinstance(k, Constant):
-                result = self.op(result, k.value, out=result)
+                result = self.op(result, k.value)
             else:
-                result = self.op(result, k(x1, x2, diag=diag),
-                                 out=result)
+                result = self.op(result, k(x1, x2, diag=diag))
         return result
 
 
@@ -79,8 +111,9 @@ class Constant(Kernel):
             shape = min((x1.size(0), x2.size(0)))
         else:
             shape = (x1.size(0), x2.size(0))
-        result = torch.empty(shape)
-        result.fill_(self._value)
+        result = torch.empty(shape, dtype=self.value.dtype,
+                             device=self.value.device)
+        result.fill_(self.value)
         return result
 
 
